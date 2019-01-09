@@ -1,4 +1,4 @@
-%% test Intersection Adjusting %% 
+%% main Intersection Adjusting %% 
 clear;
 clc;
 tic;
