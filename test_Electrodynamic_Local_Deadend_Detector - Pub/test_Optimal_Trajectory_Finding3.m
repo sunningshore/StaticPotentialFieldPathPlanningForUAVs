@@ -1,20 +1,21 @@
 function [pt_track_fit, pt_track_elev] = test_Optimal_Trajectory_Finding3 (weight_EC_cube, map_img_rgb_cube, cont_map_cube, core_pt_uni, cubic_urban_map, contour_all_cube, air_level, orig_dest, traject_fit_interv) 
 %% test Optimal Trajectory Finding %% 
 % tic; 
-input_map=weight_EC_cube(:,:,1);
+input_map=weight_EC_cube(:,:,1);    % Waypoint selection from lowest layer 
 GradMap=input_map; 
 GradMap(GradMap<0)=0; 
 [Gmag,Gdir]=imgradient(GradMap); 
 GmagUni=Gmag./(max(max(Gmag))); 
 bound_map=map_img_rgb_cube(:,:,1);
+ground_bound_map=map_img_rgb_cube(:,:,1); 
 contour_map=cont_map_cube(:,:,1);
 height_level=air_level(1);
+cubic_urban_map=cubic_urban_map;
+contour_all_cube=contour_all_cube;
 core_node=core_pt_uni; 
-guard_dist=20; 
-level_cross_thr=0.5;
-
-% traject_fit_interv=30;
-% orig_dest=[5,4];
+guard_dist=2;    % Minimum distance (field grids) allowed between UAV trajectories and buildings 
+level_cross_thr=0.5;    % Local space complexity over global space complexity, 
+% exceeding which the path planner shall go upstairs and continue searching
 
 orig_ind=orig_dest(1);
 dest_ind=orig_dest(2);
@@ -25,20 +26,21 @@ for ind_air=1:air_level_len
     eval(['contour_all_',num2str(air_level(ind_air)),'=contour_all_temp;']);
 end
 eval(['contour_all=contour_all_',num2str(air_level(1)),';']);
+ground_contour_all=contour_all;
 contour_map_ave=mean(mean(contour_map));
 [weight_row,weight_col]=size(input_map);
 core_node=round(core_node);
 [~,core_len]=size(core_node);
 core_node=cat(1,core_node,ones(1,core_len)*height_level);
-for ind_c1=orig_ind %1:core_len
+
+for ind_c1=orig_ind 
     start_pt=round(core_node(:,ind_c1)); 
-    for ind_c2=dest_ind %1:core_len 
+    for ind_c2=dest_ind 
         if ind_c1 == ind_c2
             continue;
         end
-        level_ind=1;
+        level_ind=1; 
         end_pt=round(core_node(:,ind_c2));
-%         pt_track=[];
         pt_track=[start_pt,end_pt]; 
         [~,track_len]=size(pt_track);
         vector_orig=pt_track(:,end-1);
@@ -63,6 +65,9 @@ for ind_c1=orig_ind %1:core_len
         
         dist2dest=sqrt(sum((start_pt(1:2)-end_pt(1:2)).^2));
         
+        % Find intersections between lowest contours and the straight line
+        % from planner's current waypoint to destination. 
+        % If no intersection, just fly straight; else, go to next step. 
         comp_contour=round(comp_contour);
         [~,~,intersect_ind_all]=intersect([[simul_x;simul_y],[simul_x-guard_dist;simul_y],[simul_x+guard_dist;simul_y]]',contour_all(1:2,:)','rows');
         [~,~,intersect_ind]=intersect([simul_x;simul_y]',nearset_contour(1:2,:)','rows');
@@ -78,26 +83,30 @@ for ind_c1=orig_ind %1:core_len
         search_step=search_step_min;
         tan_pt=comp_contour(:,search_step_ind);
         
+        % Avoid PingPong effects; if planner jumps back and forth for 3
+        % times, go upstairs. 
         ping_pong_count=[];
         ping_pong_ind=[];
         ping_pong_flag=0;
         ping_pong_up_flag=0;
         ping_pong_rep=0;
-        
+
+        % If no intersection, just fly straight; else, go to next step.
         if ~isempty(intersect_ind_all) %|| dist2dest > min_step 
             disp('Bro, the two end points cannot meet each other since they are too far away. Magpie Bridge being built...');
-%             [weight_CN,connect_bar,connect_bar_interp_uniform] = Connectivity_Weight4 (start_pt,end_pt,input_map,bound_map,nearset_contour);
             Connectivity_Weight_Generation=toc;
             theta_dev=90; 
             iteration=0; 
             local_cplx_set=0; 
-            while ~isempty(intersect_ind_all) %|| dist2dest > min_step 
+            
+            % Search waypoints iteratively until no intersections between lowest contours and the straight line
+            % from planner's current waypoint to destination. 
+            while ~isempty(intersect_ind_all) 
                 loop_flag=isempty(intersect_ind_all);
                 iteration=iteration+1
                 vector_orig_vrt=vector_orig;
                 
                 %% Local Complexity Linear Integration %% 
-%                 vicin_size=50; 
                 vicin_size=round(min(weight_row,weight_col)/30);
                 [cont_Gamp_map,cont_map_rgb] = Edge_Corner_Detection (contour_map);
                 local_cplx=mean(mean(cont_Gamp_map([vector_orig(2)-vicin_size:vector_orig(2)+vicin_size],[vector_orig(1)-vicin_size:vector_orig(1)+vicin_size])));
@@ -162,9 +171,12 @@ for ind_c1=orig_ind %1:core_len
                     end
                 end
                 comp_contour=contour_all;
-                nearset_contour=comp_contour;
-                [weight_CN, weight_CN_FW, weight_CN_BW] = Connectivity_Weight7 (start_pt,end_pt,input_map,bound_map,nearset_contour); 
+                nearset_contour=comp_contour; 
                 
+                % Bi-directional connectivity field, for local dead end
+                % detection 
+                [weight_CN, weight_CN_FW, weight_CN_BW] = Connectivity_Weight7 (start_pt,end_pt,input_map,bound_map,nearset_contour); 
+                % Crescent constructor for next optimal waypoint selection 
                 [simul_vrt, conn_z, theta0, simul_len_vrt] = Crescent_Constructor (vector_orig_vrt,search_step,terminal_degree,theta_dev,input_map,weight_CN);
                 simul_vrt_x=simul_vrt(1,:);
                 simul_vrt_y=simul_vrt(2,:);
@@ -172,23 +184,19 @@ for ind_c1=orig_ind %1:core_len
                 simul_vrt_z_up=simul_vrt_z+abs(min(simul_vrt_z));
                 simul_vrt_z_uniform=simul_vrt_z_up/max(simul_vrt_z_up);
                 conn_z_uni=conn_z/max(conn_z); 
-                
-%                 plot(simul_vrt_x, simul_vrt_y,'r','LineWidth',1);
-                
-                %% Distance Towards All Directions %%
+                %% Distance Towards All Directions %% 
+                % Find maximum possible distance to fly (before hitting lowest contours) towards all directions on connectivity field
                 [dist_register_ini, cn_weight_register_ini, theta, t_len] = Circle_Angle_Weight (vector_orig_vrt,terminal_degree,theta_dev,input_map,nearset_contour,weight_CN);
                 dist_register=dist_register_ini;
                 cn_weight_register=cn_weight_register_ini;
-                %% Direction Weight Seducing %%
-%                 [max_dir_val,max_dir_ind]=max(dist_register_ini);
+                %% Direction Weight Seducing %% 
+                % Longer possible distance has higher weight 
                 [max_dir_val,max_dir_ind]=max(dist_register);
-%                 dist_register_seduceing=1-abs(theta-terminal_degree)/max(abs(theta-terminal_degree));
                 dist_register_seduceing=1-abs(theta-theta(max_dir_ind))/max(abs(theta-theta(max_dir_ind)));
-                poly_ind=polyfit([1:length(dist_register)],dist_register_seduceing,2);
-                dist_register_seduceing_poly=polyval(poly_ind,[1:length(dist_register)]);
-%                 dist_register=dist_register.*dist_register_seduceing_poly;
                 dist_register=dist_register.*dist_register_seduceing;
-                %% Direction Weight Averaging %%
+                %% Direction Weight Averaging %% 
+                % Averaging over neighbouring directions to avoid single
+                % peaks 
                 dist_register_ave=zeros(1,t_len);
                 cn_weight_register_ave=zeros(1,t_len);
                 ave_step=round(t_len/8);
@@ -206,7 +214,10 @@ for ind_c1=orig_ind %1:core_len
                 end
                 dist_register_ave_uniform=dist_register_ave/max(dist_register_ave);
                 cn_weight_register_ave_uniform=cn_weight_register_ave/max(cn_weight_register_ave);
-                %% Direction Choosing %%
+                %% Direction Choosing %% 
+                
+                % Selecting the optimal waypoint based on safety and
+                % connectivity fields (conbination factors .5 & .5, should be application dependent)
                 simul_vrt_z_weight=(5/10)*simul_vrt_z_uniform+(5/10)*cn_weight_register_ave_uniform;
                 
                 [intersect_val_oval,intersect_ind_oval]=max(simul_vrt_z_weight);
@@ -239,22 +250,24 @@ for ind_c1=orig_ind %1:core_len
                 test_simul_x=test_output_pt(1,:);
                 test_simul_y=test_output_pt(2,:);
                 test_simul_z=test_output_pt(3,:);
-%                 [~,~,test_intersect_ind_all]=intersect([[test_simul_x;test_simul_y],[test_simul_x-guard_dist;test_simul_y],[test_simul_x+guard_dist;test_simul_y]]',test_contour(1:2,:)','rows');
                 [~,~,test_intersect_ind_all]=intersect([[test_simul_x;test_simul_y],[test_simul_x;test_simul_y],[test_simul_x;test_simul_y]]',test_contour(1:2,:)','rows');
-%                 eval(['contour_all_',num2str(iteration),'=contour_all;']);
                 if ~isempty(test_intersect_ind_all)
                     test_dist_mat=sqrt(sum((test_orig(1:2)*ones(1,length(test_intersect_ind_all))-[test_contour(1,test_intersect_ind_all);test_contour(2,test_intersect_ind_all)]).^2,1));
                     test_dist_mat(test_dist_mat>=guard_dist)=[]; 
                 else
                     test_dist_mat=[]; 
                 end
+                
+                % Test if intersections between lowest contours and the
+                % straight section towards next selected waypoint; 
+                % If yes, select one more intermediate waypoint. 
                 if ~isempty(test_dist_mat)
                     disp('Intermediate Intersection Occured. ');
                     [test_min_dist_val,test_min_dist_ind]=min(test_dist_mat);
                     test_intersect_ind_all=test_intersect_ind_all(test_min_dist_ind);
                     test_search_step=test_min_dist_val;
-%                     search_step=test_search_step;
                     
+                    % Gradient Descend method 
                     CurGradMag=GmagUni(next_pt(2),next_pt(1));
                     CurGradDir=Gdir(next_pt(2),next_pt(1)); 
                     CurGradDirRot=CurGradDir; 
@@ -318,18 +331,13 @@ for ind_c1=orig_ind %1:core_len
                     [~,~,intersect_ind_all]=intersect([[simul_x;simul_y],[simul_x-guard_dist;simul_y],[simul_x+guard_dist;simul_y]]',contour_all(1:2,:)','rows');
                     
                     [~,~,intersect_ind]=intersect([simul_x;simul_y]',nearset_contour(1:2,:)','rows');
-
                     intersect_ind_all=intersect_ind; 
-                    
-                    if isempty(intersect_ind)
-                        %                     while isempty(intersect_ind)
-                        %                     end
-                    end
+
                     dist_mat=sqrt(sum((vector_orig(1:2)*ones(1,length(intersect_ind))-[nearset_contour(1,intersect_ind);nearset_contour(2,intersect_ind)]).^2,1));
                     [min_dist_val,min_dist_ind]=min(dist_mat);
                     intersect_ind=intersect_ind(min_dist_ind);
-%                     search_step=min_dist_val; 
                     
+                    % Gradient Descend method 
                     CurGradMag=GmagUni(next_pt(2),next_pt(1)); 
                     CurGradDir=Gdir(next_pt(2),next_pt(1)); 
                     CurGradDirRot=CurGradDir; 
@@ -355,6 +363,7 @@ for ind_c1=orig_ind %1:core_len
                         CurGradMag = -CurGradMag; 
                     end
                     
+                    % Search step size decided by gradient descend method 
                     if ping_pong_up_flag 
                         search_step=min_dist_val; 
                         theta_dev=90; 
@@ -364,47 +373,21 @@ for ind_c1=orig_ind %1:core_len
                     
                         search_step=min(search_step, min_dist_val);
                     end
-%                     plot3(nearset_contour(1,intersect_ind),nearset_contour(2,intersect_ind),abs(nearset_contour(3,intersect_ind)),'rs');
                 end
             
             end
         end
-%         plot3(pt_track(1,:),pt_track(2,:),pt_track(3,:),'r-*');
     end
 end
-%% Trajectory Poly - Fitting %% 
-% pt_track_fit=[];
-% for ind_f=1:track_len-1 
-%     x1=pt_track(1,ind_f);
-%     x2=pt_track(1,ind_f+1);
-%     if x1 > x2 
-%         fit_x=[x1:-1:x2];
-%     else
-%         fit_x=[x1:x2];
-%     end
-%     fit_ind=polyfit([x1,x2],pt_track(2,[ind_f,ind_f+1]),1);
-%     fit_y=round(polyval(fit_ind,fit_x));
-%     pt_track_fit=cat(2,pt_track_fit,[fit_x;fit_y]);
-% end
-% [~,fit_track_len]=size(pt_track_fit);
-%% Rescaling %% 
-% resc_z=zeros(1,fit_track_len);
-% for ind_r=1:fit_track_len
-%    resc_z(ind_r)=input_map(pt_track_fit(2,ind_r),pt_track_fit(1,ind_r));
-% end
-% pt_track_fit(3,:)=resc_z; 
 %% Level Fitting %% 
 pt_track_level=[pt_track([1,2,4],:)]; 
 pt_track_level(:,ping_pong_ind-1)=[];
-% level_z=height_level*ones(1,track_len);
-% pt_track_level(3,:)=level_z; 
 %% Level Crossing Elevator %% 
 pt_level=pt_track_level(3,:); 
 [~,pt_level_len]=size(pt_track_level); 
 pt_level_diff=diff(pt_level); 
 insert_ind0=find(pt_level_diff~=0);
 if ismember (pt_level_len-1,insert_ind0) 
-%     insert_ind0(insert_ind0==pt_level_len-1)=[];  
     insert_pt=[pt_track_level(1:2,insert_ind0(1:end-1));pt_track_level(3, insert_ind0(1:end-1)+1)]; 
     last_insert_pt=[pt_track_level(1:2,pt_level_len);pt_track_level(3, pt_level_len-1)]; 
     insert_pt=cat(2,insert_pt,last_insert_pt); 
@@ -477,11 +460,3 @@ end
 pt_track_fit=cat(2,pt_track_fit,pt_track_elev(:,end));
 [~,fit_track_len]=size(pt_track_fit);
 % Path_Selecting=toc
-%% Plotting %% 
-% % % plot(simul_x,simul_y,'b');
-% plot3(nearset_contour(1,:),nearset_contour(2,:),abs(nearset_contour(3,:)),'b.');
-% % plot3(ground_contour_all(1,:),ground_contour_all(2,:),abs(ground_contour_all(3,:))-abs(ground_contour_all(3,:)),'b.');
-% % % plot3(pt_track_fit(1,:),pt_track_fit(2,:),pt_track_fit(3,:),'b-*');
-% % plot3(pt_track(1,:),pt_track(2,:),pt_track(4,:),'r-*');
-% plot3(pt_track_elev(1,:),pt_track_elev(2,:),pt_track_elev(3,:),'r-*','LineWidth',1);
-% hold off;

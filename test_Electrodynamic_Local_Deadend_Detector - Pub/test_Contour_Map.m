@@ -4,14 +4,28 @@ function [weight_EC, map_img_rgb, cont_map, core_pt_uni, contour_all] = test_Con
 % clc;
 % tic;
 %% Variables %%
-guard_dist=2;
+% load('weight_EC_cube.mat','weight_EC_cube');
+% weight_EC=weight_EC_cube(:,:,1); 
+% guard_dist=2;
+% eval(['load(''ScnBuildsEdgePoints_',num2str(15),'.mat'',''ScnBuildsEdgePoints'');']);
+
+% load('Pts.mat','Pts');
+% load('Pnts.mat','Pnts');
+% building_height_thr=30;
+guard_dist=2;    % Minimum distance (field grids) allowed between UAV trajectories and buildings 
 eval(['load(''ScnBuildsEdgePoints_',num2str(building_height_thr),'.mat'',''ScnBuildsEdgePoints'');']);
 eval(['load(''urban_map_',num2str(building_height_thr),'.mat'',''urban_map'');']);
+% eval(['load(''cubic_urban_map_',num2str(building_height_thr),'.mat'',''cubic_urban_map'');']);
 %% Layer Gradient & Edge Extraction %%
+% filename=['map_img.jpg'];
 filename=urban_map;
-[Gamp_map,map_img_rgb] = Edge_Corner_Detection (filename);
+[Gamp_map,map_img_rgb] = Edge_Corner_Detection (filename);    % DoG edge/coner detector  
 %% Edge & Corner Weighting %%
-weight_EC = Map_Safety_Weighting (Gamp_map,10,50,.95);
+% Electrostatic fields generetor by Coulomb's law, 
+% parameters depend on resutls of edge/coner detection; 
+% field strenth: coners > edges > backgrounds, 
+% field size: coners > edges > backgrounds. 
+weight_EC = Map_Safety_Weighting (Gamp_map,10,50,.95); 
 [weight_row,weight_col]=size(weight_EC);
 %% Contour Generation %%
 [minVal,minInd]=min(weight_EC(:)); 
@@ -48,6 +62,8 @@ for ind_i=1:edgePointNum
         simul_y=simul_val(2,:);
         simul_z=simul_val(3,:);
         
+        % Find the safety field strenth (minField) satisfying guard distance of all
+        % buildings 
         simul_len_cn=guard_dist;
         cn_weight_z=zeros(1,simul_len_cn);
         for ind_n=simul_len_cn
@@ -63,30 +79,35 @@ for ind_i=1:edgePointNum
 end
 ScnBuildsEdgePoints=cat(2,ScnBuildsEdgePoints,edgeWeightVal,edgeWeightValLowest); 
 
+% Draw contours on safety field from highest safety point to minField point
 cont_level=[max(max(weight_EC)):-30:max(edgeWeightValLowest)];
 [cont_val, sector_set] = Contour_Detection (weight_EC,cont_level);
 contour_x=cont_val(1,:);
 contour_y=cont_val(2,:);
 [~,sector_len]=size(sector_set);
-%% Highest Contour %%
+%% Highest Contour %% 
+% Highest contours indicate wide open safe areas, circulate core swith
+% points 
 all_level=sector_set(3,:);
 all_level_uni=unique(all_level);
 all_level_sort=sort(all_level_uni,'descend');
 max_ind=find(all_level >= all_level_sort(1));
 max_sector_set=sector_set(:,max_ind);
 [~,max_sector_len]=size(max_sector_set);
-%% Lowest Contour %%
+%% Lowest Contour %% 
+% Lowest contour indicate boundaries between operational areas and obstacle
+% areas 
 min_ind=find(all_level==all_level_sort(end));
 min_sector_set=sector_set(:,min_ind);
 [~,min_sector_len]=size(min_sector_set);
 all_level_sort=all_level_sort(end);
-%% Core Key Point %% 
+%% Core Switch Point %% 
 % figure (2)
 % imshow(map_img_rgb);
 % set(gca,'Ydir','normal');
 % % mesh(weight_EC);
 % hold;
-core_pt=[]; 
+core_pt=[];
 for ind_i=1:max_sector_len
     sta_p=max_sector_set(1,ind_i);
     end_p=max_sector_set(2,ind_i);
