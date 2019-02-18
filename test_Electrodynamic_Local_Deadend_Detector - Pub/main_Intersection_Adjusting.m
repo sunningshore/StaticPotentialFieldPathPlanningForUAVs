@@ -1,4 +1,4 @@
-%% main Intersection Adjusting %% 
+%% test Intersection Adjusting %% 
 clear;
 clc;
 tic;
@@ -45,7 +45,7 @@ for ind_i=1:traject_num
     end
 end
 %% Intersection Points on Each Level %% 
-intersect_level_tube=cell(air_level_len,1);   % Disply waypoints with at least 1 link on each layer, [index of node, index of links through the node]; 
+intersect_level_tube=cell(air_level_len,1);   % Display waypoints with at least 1 link on each layer, [index of node, index of links through the node]; 
 intersect_level_tube_pos=cell(air_level_len,1);    % Display intersection points with more than 1 links on each layer, [index of node, index of links intersecting at the node]; 
 level_adjst=zeros(traject_num ,air_level_len);    % Sub-level adjust vector, [1st level, 2nd level, 3rd level];
 for ind_l=1:air_level_len 
@@ -97,7 +97,7 @@ for ind_l=1:air_level_len
         if traject_vert_dist < UAV_vert_guard_dist 
             eval(['disp(''Oops! Link ',num2str(cluster_temp),' cannot co-exist on air layer ',num2str(ind_l),'. Please Re-plan!'');']);
         else 
-            adjst_traject_len=traject_len(cluster_temp);    % Longest path adjusted least; 
+            adjst_traject_len=traject_len(cluster_temp);    % Longest path modigied least (highest priority); 
             [val_temp,ind_temp]=sort(adjst_traject_len);
             cluster_temp=cluster_temp(ind_temp);
             level_adjst_temp=[1:cluster_size]*traject_vert_dist; 
